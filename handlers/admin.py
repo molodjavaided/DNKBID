@@ -13,7 +13,6 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from config.env import ADMIN_USER_ID
 from db.catalog import (
     add_category, add_item, add_unit,
     delete_category, delete_item, delete_unit,
@@ -26,10 +25,10 @@ from db.catalog import (
 from db.locations import add_location, delete_location, get_all_locations, get_location_by_id, rename_location
 from db.orders import get_all_orders_today, get_location_avg_orders, get_location_order_status_today
 from db.settings import (
-    get_deadline, get_mgr_reminder_interval_min, get_reminder_interval_min,
-    get_reminder_work_start, is_orders_open,
-    set_deadline, set_mgr_reminder_interval_min, set_orders_open,
-    set_reminder_interval_min, set_reminder_work_start,
+    get_deadline, get_deadline_warning_min, get_mgr_reminder_interval_min,
+    get_reminder_interval_min, get_reminder_work_start, is_orders_open,
+    set_deadline, set_deadline_warning_min, set_mgr_reminder_interval_min,
+    set_orders_open, set_reminder_interval_min, set_reminder_work_start,
 )
 from handlers.states import AdminFSM
 from keyboards.admin_kb import (
@@ -52,14 +51,14 @@ from keyboards.admin_kb import (
     units_mgmt_kb,
 )
 
+from handlers.admin_middleware import AdminOnlyMiddleware
+
 log = logging.getLogger(__name__)
 router = Router()
+router.message.middleware(AdminOnlyMiddleware())
+router.callback_query.middleware(AdminOnlyMiddleware())
 
 _TIME_RE = re.compile(r"^\d{2}:\d{2}$")
-
-
-def _is_admin(user_id: int) -> bool:
-    return user_id == ADMIN_USER_ID
 
 
 def _menu_text(orders_open: bool) -> str:
@@ -82,9 +81,6 @@ async def adm_noop(cq: CallbackQuery) -> None:
 
 @router.message(Command("admin"))
 async def cmd_admin(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        await msg.answer("⛔ Нет доступа.")
-        return
     await state.clear()
     open_ = is_orders_open()
     await msg.answer(_menu_text(open_), reply_markup=_menu_kb(open_), parse_mode="HTML")
@@ -94,9 +90,6 @@ async def cmd_admin(msg: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:toggle")
 async def adm_toggle(cq: CallbackQuery) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     new_open = not is_orders_open()
     set_orders_open(new_open)
     await cq.message.edit_text(
@@ -109,9 +102,6 @@ async def adm_toggle(cq: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "adm:set_deadline")
 async def adm_set_deadline_prompt(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     await state.set_state(AdminFSM.await_deadline)
     await cq.message.edit_text(
         "⏰ Введите время дедлайна в формате <b>HH:MM</b> (например, <code>14:00</code>):",
@@ -122,8 +112,6 @@ async def adm_set_deadline_prompt(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(AdminFSM.await_deadline)
 async def adm_deadline_input(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     text = (msg.text or "").strip()
     if not _TIME_RE.match(text):
         await msg.answer(
@@ -139,9 +127,6 @@ async def adm_deadline_input(msg: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:clear_deadline")
 async def adm_clear_deadline(cq: CallbackQuery) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     set_deadline("")
     open_ = is_orders_open()
     await cq.message.edit_text(
@@ -154,10 +139,6 @@ async def adm_clear_deadline(cq: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "adm:status")
 async def adm_status(cq: CallbackQuery) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-
     statuses = get_location_order_status_today()
     orders_today = get_all_orders_today()
 
@@ -221,9 +202,6 @@ async def adm_status(cq: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "adm:menu")
 async def adm_menu(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     await state.clear()
     open_ = is_orders_open()
     await cq.message.edit_text(
@@ -236,9 +214,6 @@ async def adm_menu(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:schedule")
 async def adm_schedule_list(cq: CallbackQuery) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     categories = get_all_categories()
     if not categories:
         await cq.answer("Нет категорий в базе.", show_alert=True)
@@ -253,9 +228,6 @@ async def adm_schedule_list(cq: CallbackQuery) -> None:
 
 @router.callback_query(CatScheduleCB.filter())
 async def adm_cat_days(cq: CallbackQuery, callback_data: CatScheduleCB) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     cat = get_category_by_id(callback_data.cat_id)
     if not cat:
         await cq.answer("Категория не найдена.", show_alert=True)
@@ -272,9 +244,6 @@ async def adm_cat_days(cq: CallbackQuery, callback_data: CatScheduleCB) -> None:
 
 @router.callback_query(DayToggleCB.filter())
 async def adm_toggle_day(cq: CallbackQuery, callback_data: DayToggleCB) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     cat = get_category_by_id(callback_data.cat_id)
     if not cat:
         await cq.answer("Категория не найдена.", show_alert=True)
@@ -291,9 +260,6 @@ async def adm_toggle_day(cq: CallbackQuery, callback_data: DayToggleCB) -> None:
 
 @router.callback_query(AdminCrudCB.filter())
 async def adm_crud(cq: CallbackQuery, callback_data: AdminCrudCB, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     section = callback_data.section
     action  = callback_data.action
     eid     = callback_data.entity_id
@@ -376,8 +342,6 @@ async def _handle_locs(cq: CallbackQuery, action: str, eid: int, state: FSMConte
 
 @router.message(AdminFSM.await_new_location_name)
 async def adm_new_location_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -395,8 +359,6 @@ async def adm_new_location_name(msg: Message, state: FSMContext) -> None:
 
 @router.message(AdminFSM.await_edit_location_name)
 async def adm_edit_location_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -476,8 +438,6 @@ async def _handle_cats(cq: CallbackQuery, action: str, eid: int, state: FSMConte
 
 @router.message(AdminFSM.await_new_category_name)
 async def adm_new_category_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -495,8 +455,6 @@ async def adm_new_category_name(msg: Message, state: FSMContext) -> None:
 
 @router.message(AdminFSM.await_edit_category_name)
 async def adm_edit_category_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -647,8 +605,6 @@ async def _handle_items(cq: CallbackQuery, action: str, eid: int, state: FSMCont
 
 @router.message(AdminFSM.await_new_item_name)
 async def adm_new_item_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -666,8 +622,6 @@ async def adm_new_item_name(msg: Message, state: FSMContext) -> None:
 
 @router.message(AdminFSM.await_edit_item_name)
 async def adm_edit_item_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -690,9 +644,6 @@ async def adm_edit_item_name(msg: Message, state: FSMContext) -> None:
 
 @router.callback_query(AdminUnitToggleCB.filter())
 async def adm_unit_toggle(cq: CallbackQuery, callback_data: AdminUnitToggleCB, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     data = await state.get_data()
     selected: list[str] = list(data.get("selected_units", []))
     unit_name = callback_data.unit_name
@@ -711,9 +662,6 @@ async def adm_unit_toggle(cq: CallbackQuery, callback_data: AdminUnitToggleCB, s
 
 @router.callback_query(F.data == "adm:units_select_done")
 async def adm_units_select_done(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     data = await state.get_data()
     selected: list[str] = data.get("selected_units", [])
     if not selected:
@@ -829,8 +777,6 @@ async def _handle_units(cq: CallbackQuery, action: str, eid: int, state: FSMCont
 
 @router.message(AdminFSM.await_new_unit_name)
 async def adm_new_unit_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -848,8 +794,6 @@ async def adm_new_unit_name(msg: Message, state: FSMContext) -> None:
 
 @router.message(AdminFSM.await_edit_unit_name)
 async def adm_edit_unit_name(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     name = (msg.text or "").strip()
     if not name:
         await msg.answer("⚠️ Введите непустое название.")
@@ -874,7 +818,8 @@ def _reminders_text() -> str:
         f"⏰ Дедлайн (конец окна): <code>{dl}</code>\n"
         f"🕗 Начало: <code>{get_reminder_work_start()}</code>\n"
         f"📢 Баристы: каждые <code>{get_reminder_interval_min()}</code> мин\n"
-        f"🔄 Доска менеджера: каждые <code>{get_mgr_reminder_interval_min()}</code> мин"
+        f"🔄 Доска менеджера: каждые <code>{get_mgr_reminder_interval_min()}</code> мин\n"
+        f"⏰ Предупреждение до дедлайна: за <code>{get_deadline_warning_min()}</code> мин"
     )
 
 
@@ -883,14 +828,12 @@ def _reminders_kb() -> object:
         start=get_reminder_work_start(),
         barista_min=get_reminder_interval_min(),
         dashboard_min=get_mgr_reminder_interval_min(),
+        warning_min=get_deadline_warning_min(),
     )
 
 
 @router.callback_query(F.data == "adm:reminders")
 async def adm_reminders(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     await state.clear()
     await cq.message.edit_text(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
     await cq.answer()
@@ -898,9 +841,6 @@ async def adm_reminders(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:set_reminder_start")
 async def adm_set_reminder_start(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     await state.set_state(AdminFSM.await_reminder_start)
     await cq.message.edit_text(
         "🕗 Введите время начала напоминаний в формате <b>HH:MM</b> (например, <code>08:00</code>):\n"
@@ -912,8 +852,6 @@ async def adm_set_reminder_start(cq: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(AdminFSM.await_reminder_start)
 async def msg_reminder_start(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     time_str = (msg.text or "").strip()
     if not _TIME_RE.match(time_str):
         await msg.answer("⚠️ Неверный формат. Используйте HH:MM (например: 08:00)")
@@ -925,9 +863,6 @@ async def msg_reminder_start(msg: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:set_reminder_interval")
 async def adm_set_reminder_interval(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     await state.set_state(AdminFSM.await_reminder_interval)
     await cq.message.edit_text(
         "📢 Введите интервал напоминаний для барист в <b>минутах</b> (например, <code>60</code>):",
@@ -938,8 +873,6 @@ async def adm_set_reminder_interval(cq: CallbackQuery, state: FSMContext) -> Non
 
 @router.message(AdminFSM.await_reminder_interval)
 async def msg_reminder_interval(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     if not (msg.text or "").strip().isdigit() or int(msg.text.strip()) < 1:
         await msg.answer("⚠️ Введите целое число ≥ 1.")
         return
@@ -950,9 +883,6 @@ async def msg_reminder_interval(msg: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "adm:set_dashboard_interval")
 async def adm_set_dashboard_interval(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     await state.set_state(AdminFSM.await_dashboard_interval)
     await cq.message.edit_text(
         "🔄 Введите интервал обновления доски менеджера в <b>минутах</b> (например, <code>30</code>):",
@@ -963,8 +893,6 @@ async def adm_set_dashboard_interval(cq: CallbackQuery, state: FSMContext) -> No
 
 @router.message(AdminFSM.await_dashboard_interval)
 async def msg_dashboard_interval(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
     if not (msg.text or "").strip().isdigit() or int(msg.text.strip()) < 1:
         await msg.answer("⚠️ Введите целое число ≥ 1.")
         return
@@ -973,11 +901,29 @@ async def msg_dashboard_interval(msg: Message, state: FSMContext) -> None:
     await msg.answer(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
 
 
+@router.callback_query(F.data == "adm:set_deadline_warning")
+async def adm_set_deadline_warning(cq: CallbackQuery, state: FSMContext) -> None:
+    await state.set_state(AdminFSM.await_deadline_warning_min)
+    await cq.message.edit_text(
+        "⏰ За сколько минут до дедлайна отправлять предупреждение менеджеру?\n"
+        "Введите целое число (например, <code>15</code>):",
+        parse_mode="HTML",
+    )
+    await cq.answer()
+
+
+@router.message(AdminFSM.await_deadline_warning_min)
+async def msg_deadline_warning_min(msg: Message, state: FSMContext) -> None:
+    if not (msg.text or "").strip().isdigit() or int(msg.text.strip()) < 1:
+        await msg.answer("⚠️ Введите целое число ≥ 1.")
+        return
+    set_deadline_warning_min(int(msg.text.strip()))
+    await state.clear()
+    await msg.answer(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
+
+
 @router.callback_query(F.data == "adm:dashboard_now")
 async def adm_dashboard_now(cq: CallbackQuery, bot: Bot) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     from services.dashboard_service import update_manager_dashboard
     await update_manager_dashboard(bot)
     await cq.answer("📤 Доска обновлена.")
@@ -987,9 +933,6 @@ async def adm_dashboard_now(cq: CallbackQuery, bot: Bot) -> None:
 
 @router.message(Command("avg_order"))
 async def cmd_avg_order(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        await msg.answer("⛔ Нет доступа.")
-        return
     await state.clear()
     locs = get_all_locations()
     if not locs:
@@ -1004,9 +947,6 @@ async def cmd_avg_order(msg: Message, state: FSMContext) -> None:
 
 @router.callback_query(AvgOrderLocCB.filter())
 async def cb_avg_order_location(cq: CallbackQuery, callback_data: AvgOrderLocCB) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
     loc = get_location_by_id(callback_data.location_id)
     if not loc:
         await cq.answer("Локация не найдена.", show_alert=True)

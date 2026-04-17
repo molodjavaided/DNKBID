@@ -216,6 +216,7 @@ def get_order_by_id(order_id: int) -> FullOrder | None:
             id=r["id"], order_id=r["order_id"], item_key=r["item_key"],
             item_name=r["item_name"], category_name=r["category_name"],
             quantity=r["quantity"], unit=r["unit"],
+            is_urgent=bool(r["is_urgent"]) if "is_urgent" in r.keys() else False,
         )
         for r in item_rows
     ]

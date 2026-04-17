@@ -74,7 +74,7 @@ def admin_menu_kb(orders_open: bool, deadline: str = "") -> InlineKeyboardMarkup
     ])
 
 
-def reminders_kb(start: str, barista_min: int, dashboard_min: int) -> InlineKeyboardMarkup:
+def reminders_kb(start: str, barista_min: int, dashboard_min: int, warning_min: int = 15) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text=f"🕗 Начало: {start}",
@@ -87,6 +87,10 @@ def reminders_kb(start: str, barista_min: int, dashboard_min: int) -> InlineKeyb
         [InlineKeyboardButton(
             text=f"🔄 Доска менеджера: каждые {dashboard_min} мин",
             callback_data="adm:set_dashboard_interval",
+        )],
+        [InlineKeyboardButton(
+            text=f"⏰ Предупреждение: за {warning_min} мин",
+            callback_data="adm:set_deadline_warning",
         )],
         [InlineKeyboardButton(text="📤 Обновить доску сейчас", callback_data="adm:dashboard_now")],
         [InlineKeyboardButton(text="◀️ В меню", callback_data="adm:menu")],

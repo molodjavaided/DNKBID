@@ -37,6 +37,7 @@ class AdminFSM(StatesGroup):
     await_edit_unit_name = State()
 
     # Reminder settings
-    await_reminder_start     = State()
-    await_reminder_interval  = State()
-    await_dashboard_interval = State()
+    await_reminder_start        = State()
+    await_reminder_interval     = State()
+    await_dashboard_interval    = State()
+    await_deadline_warning_min  = State()

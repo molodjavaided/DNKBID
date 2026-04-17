@@ -20,7 +20,10 @@ from db.orders import get_all_orders_today, get_location_order_status_today
 from db.settings import (
     clear_mgr_reminder_last_msg_id,
     get_deadline,
+    get_deadline_warning_min,
+    get_deadline_warning_sent_date,
     get_mgr_reminder_last_msg_id,
+    set_deadline_warning_sent_date,
     set_mgr_reminder_last_msg_id,
 )
 
@@ -113,6 +116,57 @@ def build_dashboard_text() -> str:
         lines.append("")
 
     return "\n".join(lines).rstrip()
+
+
+async def maybe_send_deadline_warning(bot: Bot) -> None:
+    """Send a one-time warning to manager N minutes before the deadline."""
+    deadline = get_deadline()
+    if not deadline:
+        return
+
+    now_utc = datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        local_now = now_utc.astimezone(ZoneInfo("Asia/Yekaterinburg"))
+    except ImportError:
+        from datetime import timedelta as _td
+        local_now = now_utc + _td(hours=5)
+
+    today_str = local_now.strftime("%Y-%m-%d")
+    if get_deadline_warning_sent_date() == today_str:
+        return
+
+    warn_min = get_deadline_warning_min()
+    dl_h, dl_m = map(int, deadline.split(":"))
+    dl_total = dl_h * 60 + dl_m
+    warn_total = dl_total - warn_min
+    if warn_total < 0:
+        return
+
+    now_total = local_now.hour * 60 + local_now.minute
+    if not (warn_total <= now_total < dl_total):
+        return
+
+    # Build list of locations that still have missing categories
+    from db.orders import get_location_order_status_today
+    statuses = get_location_order_status_today()
+    pending = [s.location_name for s in statuses if s.missing_categories]
+
+    if pending:
+        pending_text = "\n".join(f"⏳ {name}" for name in pending)
+        text = (
+            f"⏰ <b>Осталось {warn_min} минут до дедлайна ({deadline})</b>\n\n"
+            f"Ещё не подали заявки:\n{pending_text}"
+        )
+    else:
+        text = f"✅ <b>До дедлайна {warn_min} мин — все точки уже подали заявки!</b>"
+
+    try:
+        await bot.send_message(MANAGER_CHAT_ID, text, parse_mode="HTML")
+        set_deadline_warning_sent_date(today_str)
+        log.info("[DeadlineWarning] Sent warning, %d pending.", len(pending))
+    except Exception as err:
+        log.error("[DeadlineWarning] Failed to send: %s", err)
 
 
 async def update_manager_dashboard(bot: Bot) -> None:

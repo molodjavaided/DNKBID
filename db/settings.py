@@ -142,3 +142,23 @@ def get_reminder_work_end() -> str:
 
 def set_reminder_work_end(time: str) -> None:
     set_setting("reminder_work_end", time)
+
+
+# ── Deadline warning ───────────────────────────────────────────────────────
+
+def get_deadline_warning_min() -> int:
+    """Minutes before deadline to send manager warning (default 15)."""
+    v = get_setting("deadline_warning_min")
+    try:
+        return max(1, int(v or "15"))
+    except ValueError:
+        return 15
+
+def set_deadline_warning_min(minutes: int) -> None:
+    set_setting("deadline_warning_min", str(max(1, minutes)))
+
+def get_deadline_warning_sent_date() -> str:
+    return get_setting("deadline_warning_sent_date") or ""
+
+def set_deadline_warning_sent_date(date_str: str) -> None:
+    set_setting("deadline_warning_sent_date", date_str)

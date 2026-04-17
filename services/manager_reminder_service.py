@@ -13,7 +13,7 @@ import logging
 from aiogram import Bot
 
 from db.settings import get_deadline, get_mgr_reminder_interval_min, get_reminder_work_start
-from services.dashboard_service import update_manager_dashboard
+from services.dashboard_service import maybe_send_deadline_warning, update_manager_dashboard
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ def start_manager_reminder_loop(bot: Bot) -> asyncio.Task:
             if _within_window():
                 try:
                     await update_manager_dashboard(bot)
+                    await maybe_send_deadline_warning(bot)
                 except Exception as err:
                     log.error("[MgrReminder] Unhandled error: %s", err)
 
