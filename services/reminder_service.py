@@ -55,14 +55,26 @@ def _is_within_working_hours() -> bool:
 def _build_order_status_text() -> str:
     from db.orders import get_location_order_status_today
     from db.database import get_db
+    from datetime import datetime, timezone
     statuses = get_location_order_status_today()
     if not statuses:
         return ""
+    now_utc = datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        local_now = now_utc.astimezone(ZoneInfo("Asia/Yekaterinburg"))
+    except ImportError:
+        from datetime import timedelta
+        local_now = now_utc + timedelta(hours=5)
+    today_bit = 1 << local_now.weekday()
     all_cats = [
         r["name"] for r in get_db().execute(
-            "SELECT name FROM categories ORDER BY sort_order, id"
+            "SELECT name, order_days FROM categories ORDER BY sort_order, id"
         ).fetchall()
+        if (r["order_days"] or 127) & today_bit
     ]
+    if not all_cats:
+        return ""
     lines = []
     for s in statuses:
         icon = "✅" if not s.missing_categories else "⏳"

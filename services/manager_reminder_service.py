@@ -60,6 +60,18 @@ def _within_window() -> bool:
     return start <= now <= deadline
 
 
+def _today_bit() -> int:
+    from datetime import datetime, timezone
+    now_utc = datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        local = now_utc.astimezone(ZoneInfo("Asia/Yekaterinburg"))
+    except ImportError:
+        from datetime import timedelta
+        local = now_utc + timedelta(hours=5)
+    return 1 << local.weekday()
+
+
 def _build_status_report() -> str | None:
     """
     Build the HTML status report for MANAGER_CHAT_ID.
@@ -73,13 +85,23 @@ def _build_status_report() -> str | None:
     if all_done:
         return None
 
+    from db.database import get_db
+    today_bit = _today_bit()
+    all_cats = [
+        r["name"] for r in get_db().execute(
+            "SELECT name, order_days FROM categories ORDER BY sort_order, id"
+        ).fetchall()
+        if (r["order_days"] or 127) & today_bit
+    ]
+
     now = _local_hhmm()
     lines = [f"📊 <b>Статус заявок — {now}</b>\n"]
     for s in statuses:
-        if not s.missing_categories:
+        missing_today = [c for c in s.missing_categories if c in all_cats]
+        if not missing_today:
             lines.append(f"✅ {s.location_name}")
         else:
-            missing = "  ❌ " + "\n  ❌ ".join(s.missing_categories)
+            missing = "  ❌ " + "\n  ❌ ".join(missing_today)
             lines.append(f"❌ <b>{s.location_name}</b>\n{missing}")
 
     interval = get_mgr_reminder_interval_min()
