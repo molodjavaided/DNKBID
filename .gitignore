@@ -1,0 +1,13 @@
+venv/
+.venv/
+.env
+.env.example
+__pycache__/
+*.pyc
+data/
+*.db
+*.log
+.DS_Store
+.claude/
+*.db-shm
+*.db-wal
