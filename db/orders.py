@@ -276,6 +276,34 @@ def get_unreported_orders() -> List[FullOrder]:
     return [_row_to_full_order(r, items_by_order.get(r["id"], [])) for r in header_rows]
 
 
+def get_all_orders_today() -> List[FullOrder]:
+    """Returns all orders submitted today (all locations), newest per location first."""
+    today_start_iso = _local_today_start_iso()
+    db = get_db()
+    header_rows = db.execute(
+        """
+        SELECT o.id, o.location_id, o.tg_message_id, o.tg_chat_id,
+               o.tg_user_id, o.tg_user_name, o.status, o.created_at,
+               o.reported_at, l.name AS location_name
+        FROM orders o
+        JOIN locations l ON l.id = o.location_id
+        WHERE o.created_at >= ?
+        ORDER BY o.location_id, o.id
+        """,
+        (today_start_iso,),
+    ).fetchall()
+    if not header_rows:
+        return []
+    order_ids = [r["id"] for r in header_rows]
+    placeholders = ",".join("?" * len(order_ids))
+    item_rows = db.execute(
+        f"SELECT * FROM order_items WHERE order_id IN ({placeholders}) ORDER BY order_id, id",
+        order_ids,
+    ).fetchall()
+    items_by_order = _item_rows_to_list(item_rows)
+    return [_row_to_full_order(r, items_by_order.get(r["id"], [])) for r in header_rows]
+
+
 def mark_orders_reported(order_ids: List[int]) -> None:
     if not order_ids:
         return

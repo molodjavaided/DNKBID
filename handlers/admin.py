@@ -24,7 +24,7 @@ from db.catalog import (
     set_item_allowed_units, toggle_category_day, toggle_item_availability,
 )
 from db.locations import add_location, delete_location, get_all_locations, get_location_by_id, rename_location
-from db.orders import get_location_avg_orders, get_location_order_status_today
+from db.orders import get_all_orders_today, get_location_avg_orders, get_location_order_status_today
 from db.settings import (
     get_deadline, get_ignore_working_hours, get_mgr_reminder_deadline,
     get_mgr_reminder_interval_min, get_mgr_reminder_start, get_reminder_interval_min,
@@ -163,18 +163,55 @@ async def adm_status(cq: CallbackQuery) -> None:
     if not _is_admin(cq.from_user.id):
         await cq.answer("⛔ Нет доступа.", show_alert=True)
         return
+
     statuses = get_location_order_status_today()
+    orders_today = get_all_orders_today()
+
+    # Group orders by location_id, merge all items across multiple orders
+    from collections import defaultdict
+    loc_items: dict[int, dict[str, dict]] = defaultdict(dict)
+    for order in orders_today:
+        for item in order.items:
+            key = f"{item.item_key}:{item.unit}"
+            if key in loc_items[order.location_id]:
+                loc_items[order.location_id][key]["quantity"] += item.quantity
+            else:
+                loc_items[order.location_id][key] = {
+                    "item_name":     item.item_name,
+                    "category_name": item.category_name,
+                    "quantity":      item.quantity,
+                    "unit":          item.unit,
+                    "is_urgent":     item.is_urgent,
+                }
+
     if not statuses:
         body = "Локации не найдены."
     else:
         lines: list[str] = []
         for s in statuses:
             if not s.missing_categories:
-                lines.append(f"✅ {s.location_name}")
+                lines.append(f"✅ <b>{s.location_name}</b>")
             else:
                 missing = ", ".join(s.missing_categories)
-                lines.append(f"❌ {s.location_name} — нет: <i>{missing}</i>")
-        body = "\n".join(lines)
+                lines.append(f"❌ <b>{s.location_name}</b> — нет: <i>{missing}</i>")
+
+            items = loc_items.get(s.location_id, {})
+            if items:
+                # Group by category
+                cat_groups: dict[str, list] = {}
+                for entry in items.values():
+                    cat_groups.setdefault(entry["category_name"], []).append(entry)
+                for cat_name, entries in cat_groups.items():
+                    lines.append(f"  <b>{cat_name}:</b>")
+                    for e in entries:
+                        qty = int(e["quantity"]) if e["quantity"] == int(e["quantity"]) else e["quantity"]
+                        prefix = "🚨 " if e["is_urgent"] else ""
+                        lines.append(f"    • {prefix}{e['item_name']} — {qty} {e['unit']}")
+            else:
+                lines.append("  <i>заявок нет</i>")
+            lines.append("")
+        body = "\n".join(lines).rstrip()
+
     try:
         await cq.message.edit_text(
             f"<b>📊 Статус заявок на сегодня:</b>\n\n{body}",
