@@ -20,7 +20,7 @@ import logging
 
 from aiogram import Bot
 
-from config.env import MANAGER_CHAT_ID, TEST_MODE
+from config.env import MANAGER_CHAT_ID
 from db.orders import get_location_order_status_today
 from db.settings import (
     clear_mgr_reminder_last_msg_id,
@@ -50,7 +50,7 @@ def _local_hhmm() -> str:
 
 def _within_window() -> bool:
     """True if current time is between mgr_reminder_start and mgr_reminder_deadline."""
-    if TEST_MODE or get_ignore_working_hours():
+    if get_ignore_working_hours():
         return True
     now = _local_hhmm()
     start    = get_mgr_reminder_start()
@@ -125,11 +125,9 @@ def start_manager_reminder_loop(bot: Bot) -> asyncio.Task:
     so admin changes take effect without a restart.
     """
     async def _loop() -> None:
-        log.info("[MgrReminder] Loop started. TEST_MODE=%s", TEST_MODE)
+        log.info("[MgrReminder] Loop started.")
         while True:
             interval_s = get_mgr_reminder_interval_min() * 60
-            if TEST_MODE:
-                interval_s = 60  # fast tick in test mode
             await asyncio.sleep(interval_s)
             try:
                 await send_manager_status_report(bot)

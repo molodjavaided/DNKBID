@@ -25,7 +25,7 @@ async def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     log = logging.getLogger(__name__)
-    log.info("[Boot] Starting BotDnkBid_py  TEST_MODE=%s", env.TEST_MODE)
+    log.info("[Boot] Starting BotDnkBid_py")
 
     # 1. DB migrations + seed
     run_migrations()
@@ -44,7 +44,7 @@ async def main() -> None:
     # 4. Background services
     reminder_task     = start_reminder_loop(bot)
     mgr_reminder_task = start_manager_reminder_loop(bot)
-    log.info("[Scheduler] Reminder interval: %ss", env.REMINDER_INTERVAL_S)
+
 
     # 5. Polling
     try:

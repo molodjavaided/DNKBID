@@ -21,7 +21,7 @@ from db.settings import (
     get_reminder_message_id, set_reminder_message_id, clear_reminder_message_id,
     get_ignore_working_hours, get_reminder_work_start, get_reminder_work_end,
 )
-from config import env
+from config.env import BOT_USERNAME
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ def _current_local_hhmm() -> str:
 
 
 def _is_within_working_hours() -> bool:
-    if env.TEST_MODE or get_ignore_working_hours():
+    if get_ignore_working_hours():
         return True
     now = _current_local_hhmm()
     work_start = get_reminder_work_start()
@@ -85,12 +85,12 @@ def _build_reminder_text() -> str:
 
 def _build_reminder_kb() -> InlineKeyboardMarkup | None:
     """Build keyboard with 'Create order' button that opens bot in PM."""
-    if not env.BOT_USERNAME:
+    if not BOT_USERNAME:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="📝 Создать заявку",
-            url=f"https://t.me/{env.BOT_USERNAME}?start=order",
+            url=f"https://t.me/{BOT_USERNAME}?start=order",
         )],
     ])
 
@@ -143,11 +143,9 @@ def start_reminder_loop(bot: Bot) -> asyncio.Task:
     from db.settings import get_reminder_interval_min
 
     async def _loop() -> None:
-        log.info("[Reminder] Loop started — TEST_MODE=%s", env.TEST_MODE)
+        log.info("[Reminder] Loop started.")
         while True:
             interval_s = get_reminder_interval_min() * 60
-            if env.TEST_MODE:
-                interval_s = 60
             await asyncio.sleep(interval_s)
             try:
                 await send_reminders(bot)
