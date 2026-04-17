@@ -12,7 +12,7 @@ import logging
 
 from aiogram import Bot
 
-from db.settings import get_ignore_working_hours, get_mgr_reminder_deadline, get_mgr_reminder_interval_min, get_mgr_reminder_start
+from db.settings import get_deadline, get_mgr_reminder_interval_min, get_reminder_work_start
 from services.dashboard_service import update_manager_dashboard
 
 log = logging.getLogger(__name__)
@@ -30,14 +30,14 @@ def _local_hhmm() -> str:
 
 
 def _within_window() -> bool:
-    if get_ignore_working_hours():
-        return True
     now = _local_hhmm()
-    start    = get_mgr_reminder_start()
-    deadline = get_mgr_reminder_deadline()
-    if not start or not deadline:
-        return True
-    return start <= now <= deadline
+    start    = get_reminder_work_start()
+    deadline = get_deadline()
+    if start and now < start:
+        return False
+    if deadline and now > deadline:
+        return False
+    return True
 
 
 def start_manager_reminder_loop(bot: Bot) -> asyncio.Task:

@@ -19,7 +19,7 @@ from db.chats import get_active_chats
 from db.settings import (
     get_deadline, is_orders_open,
     get_reminder_message_id, set_reminder_message_id, clear_reminder_message_id,
-    get_ignore_working_hours, get_reminder_work_start, get_reminder_work_end,
+    get_reminder_work_start,
 )
 from config.env import BOT_USERNAME
 
@@ -40,13 +40,12 @@ def _current_local_hhmm() -> str:
 
 
 def _is_within_working_hours() -> bool:
-    if get_ignore_working_hours():
-        return True
     now = _current_local_hhmm()
     work_start = get_reminder_work_start()
     if now < work_start:
         return False
-    work_end = get_reminder_work_end()
+    from db.settings import get_deadline
+    work_end = get_deadline()
     if work_end and now > work_end:
         return False
     return True

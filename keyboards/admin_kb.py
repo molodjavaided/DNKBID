@@ -49,16 +49,20 @@ _DAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 # ── Main menu ─────────────────────────────────────────────────────────────────
 
-def admin_menu_kb(orders_open: bool) -> InlineKeyboardMarkup:
+def admin_menu_kb(orders_open: bool, deadline: str = "") -> InlineKeyboardMarkup:
     toggle_text = "🔴 Закрыть приём заявок" if orders_open else "🟢 Открыть приём заявок"
+    dl_text = f"⏰ Дедлайн: {deadline}" if deadline else "⏰ Установить дедлайн"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=toggle_text,               callback_data="adm:toggle")],
-        [InlineKeyboardButton(text="⏰ Установить дедлайн",  callback_data="adm:set_deadline")],
-        [InlineKeyboardButton(text="🗑 Сбросить дедлайн",    callback_data="adm:clear_deadline")],
-        [InlineKeyboardButton(text="📅 Расписание категорий", callback_data="adm:schedule")],
-        [InlineKeyboardButton(text="📊 Статус заявок",        callback_data="adm:status")],
-        [InlineKeyboardButton(text="🔔 Напоминания менеджеру", callback_data="adm:mgr_reminder")],
-        [InlineKeyboardButton(text="⏱ Интервалы и время",    callback_data="adm:intervals")],
+        [InlineKeyboardButton(text=toggle_text, callback_data="adm:toggle")],
+        [
+            InlineKeyboardButton(text=dl_text,       callback_data="adm:set_deadline"),
+            InlineKeyboardButton(text="🗑",          callback_data="adm:clear_deadline"),
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статус заявок",        callback_data="adm:status"),
+            InlineKeyboardButton(text="📅 Расписание",           callback_data="adm:schedule"),
+        ],
+        [InlineKeyboardButton(text="🔔 Напоминания",             callback_data="adm:reminders")],
         [
             InlineKeyboardButton(text="🏢 Локации",   callback_data=AdminCrudCB(section="locs",  action="list").pack()),
             InlineKeyboardButton(text="📂 Категории", callback_data=AdminCrudCB(section="cats",  action="list").pack()),
@@ -70,42 +74,21 @@ def admin_menu_kb(orders_open: bool) -> InlineKeyboardMarkup:
     ])
 
 
-def mgr_reminder_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🕗 Начало",     callback_data="adm:mgr_set_start")],
-        [InlineKeyboardButton(text="🕑 Дедлайн",   callback_data="adm:mgr_set_deadline")],
-        [InlineKeyboardButton(text="⏱ Интервал",   callback_data="adm:mgr_set_interval")],
-        [InlineKeyboardButton(text="📤 Отправить сейчас", callback_data="adm:mgr_send_now")],
-        [InlineKeyboardButton(text="◀️ В меню",    callback_data="adm:menu")],
-    ])
-
-
-def intervals_kb(
-    reminder_min: int, report_min: int, reminder_start: str,
-    reminder_end: str, ignore_working_hours: bool,
-) -> InlineKeyboardMarkup:
-    ignore_text = "✅ Игнорировать" if ignore_working_hours else "❌ Не игнорировать"
+def reminders_kb(start: str, barista_min: int, dashboard_min: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text=f"📢 Интервал напоминания: {reminder_min} мин",
-            callback_data="adm:set_reminder_interval",
-        )],
-        [InlineKeyboardButton(
-            text=f"📊 Интервал отчёта: {report_min} мин",
-            callback_data="adm:set_report_interval",
-        )],
-        [InlineKeyboardButton(
-            text=f"🕖 Начало работы: {reminder_start}",
+            text=f"🕗 Начало: {start}",
             callback_data="adm:set_reminder_start",
         )],
         [InlineKeyboardButton(
-            text=f"🕕 Конец работы: {reminder_end or 'как дедлайн'}",
-            callback_data="adm:set_reminder_end",
+            text=f"📢 Баристы: каждые {barista_min} мин",
+            callback_data="adm:set_reminder_interval",
         )],
         [InlineKeyboardButton(
-            text=f"🚫 Проверка времени: {ignore_text}",
-            callback_data="adm:toggle_ignore_working_hours",
+            text=f"🔄 Доска менеджера: каждые {dashboard_min} мин",
+            callback_data="adm:set_dashboard_interval",
         )],
+        [InlineKeyboardButton(text="📤 Обновить доску сейчас", callback_data="adm:dashboard_now")],
         [InlineKeyboardButton(text="◀️ В меню", callback_data="adm:menu")],
     ])
 

@@ -26,13 +26,10 @@ from db.catalog import (
 from db.locations import add_location, delete_location, get_all_locations, get_location_by_id, rename_location
 from db.orders import get_all_orders_today, get_location_avg_orders, get_location_order_status_today
 from db.settings import (
-    get_deadline, get_ignore_working_hours, get_mgr_reminder_deadline,
-    get_mgr_reminder_interval_min, get_mgr_reminder_start, get_reminder_interval_min,
-    get_reminder_work_end, get_reminder_work_start, get_report_interval_min,
-    is_orders_open, set_deadline, set_ignore_working_hours, set_mgr_reminder_deadline,
-    set_mgr_reminder_interval_min, set_mgr_reminder_start, set_orders_open,
-    set_reminder_interval_min, set_reminder_work_end, set_reminder_work_start,
-    set_report_interval_min,
+    get_deadline, get_mgr_reminder_interval_min, get_reminder_interval_min,
+    get_reminder_work_start, is_orders_open,
+    set_deadline, set_mgr_reminder_interval_min, set_orders_open,
+    set_reminder_interval_min, set_reminder_work_start,
 )
 from handlers.states import AdminFSM
 from keyboards.admin_kb import (
@@ -47,12 +44,11 @@ from keyboards.admin_kb import (
     categories_mgmt_kb,
     confirm_delete_kb,
     day_toggle_kb,
-    intervals_kb,
     item_units_select_kb,
     items_cat_select_kb,
     items_mgmt_kb,
     locations_mgmt_kb,
-    mgr_reminder_kb,
+    reminders_kb,
     units_mgmt_kb,
 )
 
@@ -68,13 +64,11 @@ def _is_admin(user_id: int) -> bool:
 
 def _menu_text(orders_open: bool) -> str:
     status = "🟢 открыт" if orders_open else "🔴 закрыт"
-    deadline = get_deadline()
-    dl_line = f"⏰ Дедлайн: {deadline}" if deadline else "⏰ Дедлайн: не установлен"
-    return (
-        "<b>⚙️ Панель администратора</b>\n\n"
-        f"Приём заявок: {status}\n"
-        f"{dl_line}"
-    )
+    return f"<b>⚙️ Панель администратора</b>\n\nПриём заявок: {status}"
+
+
+def _menu_kb(orders_open: bool) -> object:
+    return admin_menu_kb(orders_open, deadline=get_deadline() or "")
 
 
 # ── No-op (display-only buttons) ─────────────────────────────────────────────
@@ -93,7 +87,7 @@ async def cmd_admin(msg: Message, state: FSMContext) -> None:
         return
     await state.clear()
     open_ = is_orders_open()
-    await msg.answer(_menu_text(open_), reply_markup=admin_menu_kb(open_), parse_mode="HTML")
+    await msg.answer(_menu_text(open_), reply_markup=_menu_kb(open_), parse_mode="HTML")
 
 
 # ── Toggle orders ─────────────────────────────────────────────────────────────
@@ -140,7 +134,7 @@ async def adm_deadline_input(msg: Message, state: FSMContext) -> None:
     set_deadline(text)
     await state.clear()
     open_ = is_orders_open()
-    await msg.answer(_menu_text(open_), reply_markup=admin_menu_kb(open_), parse_mode="HTML")
+    await msg.answer(_menu_text(open_), reply_markup=_menu_kb(open_), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "adm:clear_deadline")
@@ -151,7 +145,7 @@ async def adm_clear_deadline(cq: CallbackQuery) -> None:
     set_deadline("")
     open_ = is_orders_open()
     await cq.message.edit_text(
-        _menu_text(open_), reply_markup=admin_menu_kb(open_), parse_mode="HTML"
+        _menu_text(open_), reply_markup=_menu_kb(open_), parse_mode="HTML"
     )
     await cq.answer("Дедлайн сброшен.")
 
@@ -215,7 +209,7 @@ async def adm_status(cq: CallbackQuery) -> None:
     try:
         await cq.message.edit_text(
             f"<b>📊 Статус заявок на сегодня:</b>\n\n{body}",
-            reply_markup=admin_menu_kb(is_orders_open()),
+            reply_markup=_menu_kb(is_orders_open()),
             parse_mode="HTML",
         )
     except Exception:
@@ -233,7 +227,7 @@ async def adm_menu(cq: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     open_ = is_orders_open()
     await cq.message.edit_text(
-        _menu_text(open_), reply_markup=admin_menu_kb(open_), parse_mode="HTML"
+        _menu_text(open_), reply_markup=_menu_kb(open_), parse_mode="HTML"
     )
     await cq.answer()
 
@@ -870,223 +864,36 @@ async def adm_edit_unit_name(msg: Message, state: FSMContext) -> None:
     )
 
 
-# ── Manager reminder settings ─────────────────────────────────────────────────
+# ── Reminders (unified) ───────────────────────────────────────────────────────
 
-def _mgr_reminder_text() -> str:
-    start    = get_mgr_reminder_start()
-    deadline = get_mgr_reminder_deadline()
-    interval = get_mgr_reminder_interval_min()
+def _reminders_text() -> str:
+    deadline = get_deadline()
+    dl = deadline or "не установлен"
     return (
-        "<b>🔔 Напоминания менеджеру</b>\n\n"
-        f"🕗 Начало:    <code>{start}</code>\n"
-        f"🕑 Дедлайн:  <code>{deadline}</code>\n"
-        f"⏱ Интервал: каждые <code>{interval}</code> мин.\n\n"
-        "Бот отправляет статус-отчёт в чат менеджера в указанном окне."
+        "<b>🔔 Напоминания</b>\n\n"
+        f"⏰ Дедлайн (конец окна): <code>{dl}</code>\n"
+        f"🕗 Начало: <code>{get_reminder_work_start()}</code>\n"
+        f"📢 Баристы: каждые <code>{get_reminder_interval_min()}</code> мин\n"
+        f"🔄 Доска менеджера: каждые <code>{get_mgr_reminder_interval_min()}</code> мин"
     )
 
 
-@router.callback_query(F.data == "adm:mgr_reminder")
-async def adm_mgr_reminder(cq: CallbackQuery, state: FSMContext) -> None:
+def _reminders_kb() -> object:
+    return reminders_kb(
+        start=get_reminder_work_start(),
+        barista_min=get_reminder_interval_min(),
+        dashboard_min=get_mgr_reminder_interval_min(),
+    )
+
+
+@router.callback_query(F.data == "adm:reminders")
+async def adm_reminders(cq: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(cq.from_user.id):
         await cq.answer("⛔ Нет доступа.", show_alert=True)
         return
     await state.clear()
-    await cq.message.edit_text(
-        _mgr_reminder_text(), reply_markup=mgr_reminder_kb(), parse_mode="HTML"
-    )
+    await cq.message.edit_text(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
     await cq.answer()
-
-
-@router.callback_query(F.data == "adm:mgr_set_start")
-async def adm_mgr_set_start(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    await state.set_state(AdminFSM.await_mgr_reminder_start)
-    await cq.message.edit_text(
-        "🕗 Введите время начала рассылки в формате <b>HH:MM</b> (например, <code>08:00</code>):",
-        parse_mode="HTML",
-    )
-    await cq.answer()
-
-
-@router.message(AdminFSM.await_mgr_reminder_start)
-async def adm_mgr_start_input(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
-    text = (msg.text or "").strip()
-    if not _TIME_RE.match(text):
-        await msg.answer("⚠️ Неверный формат. Введите время как HH:MM, например <code>08:00</code>.", parse_mode="HTML")
-        return
-    set_mgr_reminder_start(text)
-    await state.clear()
-    await msg.answer(_mgr_reminder_text(), reply_markup=mgr_reminder_kb(), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "adm:mgr_set_deadline")
-async def adm_mgr_set_deadline(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    await state.set_state(AdminFSM.await_mgr_reminder_deadline)
-    await cq.message.edit_text(
-        "🕑 Введите время дедлайна рассылки в формате <b>HH:MM</b> (например, <code>14:00</code>):",
-        parse_mode="HTML",
-    )
-    await cq.answer()
-
-
-@router.message(AdminFSM.await_mgr_reminder_deadline)
-async def adm_mgr_deadline_input(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
-    text = (msg.text or "").strip()
-    if not _TIME_RE.match(text):
-        await msg.answer("⚠️ Неверный формат. Введите время как HH:MM, например <code>14:00</code>.", parse_mode="HTML")
-        return
-    set_mgr_reminder_deadline(text)
-    await state.clear()
-    await msg.answer(_mgr_reminder_text(), reply_markup=mgr_reminder_kb(), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "adm:mgr_set_interval")
-async def adm_mgr_set_interval(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    await state.set_state(AdminFSM.await_mgr_reminder_interval)
-    await cq.message.edit_text(
-        "⏱ Введите интервал рассылки в <b>минутах</b> (например, <code>30</code> или <code>60</code>):",
-        parse_mode="HTML",
-    )
-    await cq.answer()
-
-
-@router.message(AdminFSM.await_mgr_reminder_interval)
-async def adm_mgr_interval_input(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
-    text = (msg.text or "").strip()
-    if not text.isdigit() or int(text) < 1:
-        await msg.answer("⚠️ Введите целое число минут, например <code>30</code>.", parse_mode="HTML")
-        return
-    set_mgr_reminder_interval_min(int(text))
-    await state.clear()
-    await msg.answer(_mgr_reminder_text(), reply_markup=mgr_reminder_kb(), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "adm:mgr_send_now")
-async def adm_mgr_send_now(cq: CallbackQuery, bot: Bot) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    from services.manager_reminder_service import send_manager_status_report
-    sent = await send_manager_status_report(bot, force=True)
-    if sent:
-        await cq.answer("📤 Отчёт отправлен.")
-    else:
-        await cq.answer("ℹ️ Нечего отправлять — все локации завершили заказы.", show_alert=True)
-
-
-# ── Service intervals (admin settings) ────────────────────────────────────────
-
-@router.callback_query(F.data == "adm:intervals")
-async def adm_intervals(cq: CallbackQuery) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    reminder_min = get_reminder_interval_min()
-    report_min = get_report_interval_min()
-    reminder_start = get_reminder_work_start()
-    reminder_end = get_reminder_work_end()
-    ignore = get_ignore_working_hours()
-    await cq.message.edit_text(
-        "<b>⏱ Интервалы и время</b>\n\n"
-        f"📢 Напоминание барист: каждые {reminder_min} мин\n"
-        f"📊 Отчёт менеджеру: каждые {report_min} мин\n"
-        f"🕖 Начало работы: {reminder_start}\n"
-        f"🕕 Конец работы: {reminder_end or 'не установлен'}\n"
-        f"🚫 Игнорировать проверку времени: {'да' if ignore else 'нет'}",
-        reply_markup=intervals_kb(reminder_min, report_min, reminder_start, reminder_end, ignore),
-        parse_mode="HTML",
-    )
-    await cq.answer()
-
-
-@router.callback_query(F.data == "adm:set_reminder_interval")
-async def adm_set_reminder_interval(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    await state.set_state(AdminFSM.await_reminder_interval)
-    await cq.message.edit_text(
-        "✏️ Введите интервал напоминания для барист (в минутах):\n"
-        "<i>(число ≥ 1)</i>",
-        parse_mode="HTML",
-    )
-    await cq.answer()
-
-
-@router.message(AdminFSM.await_reminder_interval)
-async def msg_reminder_interval(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
-    try:
-        minutes = int((msg.text or "").strip())
-        if minutes < 1:
-            raise ValueError
-        set_reminder_interval_min(minutes)
-        reminder_min = minutes
-        report_min = get_report_interval_min()
-        reminder_start = get_reminder_work_start()
-        reminder_end = get_reminder_work_end()
-        ignore = get_ignore_working_hours()
-        await msg.answer(
-            f"✅ Интервал напоминания установлен: {minutes} мин",
-            reply_markup=intervals_kb(reminder_min, report_min, reminder_start, reminder_end, ignore),
-            parse_mode="HTML",
-        )
-        await state.clear()
-    except (ValueError, AttributeError):
-        await msg.answer("⚠️ Введите целое число ≥ 1.")
-
-
-@router.callback_query(F.data == "adm:set_report_interval")
-async def adm_set_report_interval(cq: CallbackQuery, state: FSMContext) -> None:
-    if not _is_admin(cq.from_user.id):
-        await cq.answer("⛔ Нет доступа.", show_alert=True)
-        return
-    await state.set_state(AdminFSM.await_report_interval)
-    await cq.message.edit_text(
-        "✏️ Введите интервал отчёта для менеджера (в минутах):\n"
-        "<i>(число ≥ 1)</i>",
-        parse_mode="HTML",
-    )
-    await cq.answer()
-
-
-@router.message(AdminFSM.await_report_interval)
-async def msg_report_interval(msg: Message, state: FSMContext) -> None:
-    if not _is_admin(msg.from_user.id):
-        return
-    try:
-        minutes = int((msg.text or "").strip())
-        if minutes < 1:
-            raise ValueError
-        set_report_interval_min(minutes)
-        reminder_min = get_reminder_interval_min()
-        report_min = minutes
-        reminder_start = get_reminder_work_start()
-        reminder_end = get_reminder_work_end()
-        ignore = get_ignore_working_hours()
-        await msg.answer(
-            f"✅ Интервал отчёта установлен: {minutes} мин",
-            reply_markup=intervals_kb(reminder_min, report_min, reminder_start, reminder_end, ignore),
-            parse_mode="HTML",
-        )
-        await state.clear()
-    except (ValueError, AttributeError):
-        await msg.answer("⚠️ Введите целое число ≥ 1.")
 
 
 @router.callback_query(F.data == "adm:set_reminder_start")
@@ -1096,7 +903,7 @@ async def adm_set_reminder_start(cq: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(AdminFSM.await_reminder_start)
     await cq.message.edit_text(
-        "✏️ Введите время начала работы (формат HH:MM):\n"
+        "🕗 Введите время начала напоминаний в формате <b>HH:MM</b> (например, <code>08:00</code>):\n"
         "<i>Например: 08:00</i>",
         parse_mode="HTML",
     )
@@ -1112,72 +919,68 @@ async def msg_reminder_start(msg: Message, state: FSMContext) -> None:
         await msg.answer("⚠️ Неверный формат. Используйте HH:MM (например: 08:00)")
         return
     set_reminder_work_start(time_str)
-    reminder_min = get_reminder_interval_min()
-    report_min = get_report_interval_min()
-    reminder_start = time_str
-    reminder_end = get_reminder_work_end()
-    ignore = get_ignore_working_hours()
-    await msg.answer(
-        f"✅ Время начала установлено: {time_str}",
-        reply_markup=intervals_kb(reminder_min, report_min, reminder_start, reminder_end, ignore),
-        parse_mode="HTML",
-    )
     await state.clear()
+    await msg.answer(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
 
 
-@router.callback_query(F.data == "adm:set_reminder_end")
-async def adm_set_reminder_end(cq: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data == "adm:set_reminder_interval")
+async def adm_set_reminder_interval(cq: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(cq.from_user.id):
         await cq.answer("⛔ Нет доступа.", show_alert=True)
         return
-    await state.set_state(AdminFSM.await_reminder_end)
+    await state.set_state(AdminFSM.await_reminder_interval)
     await cq.message.edit_text(
-        "✏️ Введите время окончания работы (формат HH:MM):\n"
-        "<i>Или отправьте пусто, чтобы использовать дедлайн</i>",
+        "📢 Введите интервал напоминаний для барист в <b>минутах</b> (например, <code>60</code>):",
         parse_mode="HTML",
     )
     await cq.answer()
 
 
-@router.message(AdminFSM.await_reminder_end)
-async def msg_reminder_end(msg: Message, state: FSMContext) -> None:
+@router.message(AdminFSM.await_reminder_interval)
+async def msg_reminder_interval(msg: Message, state: FSMContext) -> None:
     if not _is_admin(msg.from_user.id):
         return
-    time_str = (msg.text or "").strip()
-    if time_str and not _TIME_RE.match(time_str):
-        await msg.answer("⚠️ Неверный формат. Используйте HH:MM (например: 14:00)")
+    if not (msg.text or "").strip().isdigit() or int(msg.text.strip()) < 1:
+        await msg.answer("⚠️ Введите целое число ≥ 1.")
         return
-    set_reminder_work_end(time_str)
-    reminder_min = get_reminder_interval_min()
-    report_min = get_report_interval_min()
-    reminder_start = get_reminder_work_start()
-    reminder_end = time_str
-    ignore = get_ignore_working_hours()
-    status = time_str if time_str else "использует дедлайн"
-    await msg.answer(
-        f"✅ Время окончания установлено: {status}",
-        reply_markup=intervals_kb(reminder_min, report_min, reminder_start, reminder_end, ignore),
-        parse_mode="HTML",
-    )
+    set_reminder_interval_min(int(msg.text.strip()))
     await state.clear()
+    await msg.answer(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
 
 
-@router.callback_query(F.data == "adm:toggle_ignore_working_hours")
-async def adm_toggle_ignore_working_hours(cq: CallbackQuery) -> None:
+@router.callback_query(F.data == "adm:set_dashboard_interval")
+async def adm_set_dashboard_interval(cq: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(cq.from_user.id):
         await cq.answer("⛔ Нет доступа.", show_alert=True)
         return
-    current = get_ignore_working_hours()
-    new_value = not current
-    set_ignore_working_hours(new_value)
-    reminder_min = get_reminder_interval_min()
-    report_min = get_report_interval_min()
-    reminder_start = get_reminder_work_start()
-    reminder_end = get_reminder_work_end()
-    await cq.message.edit_reply_markup(
-        reply_markup=intervals_kb(reminder_min, report_min, reminder_start, reminder_end, new_value)
+    await state.set_state(AdminFSM.await_dashboard_interval)
+    await cq.message.edit_text(
+        "🔄 Введите интервал обновления доски менеджера в <b>минутах</b> (например, <code>30</code>):",
+        parse_mode="HTML",
     )
-    await cq.answer(f"{'✅ Включено' if new_value else '❌ Отключено'}")
+    await cq.answer()
+
+
+@router.message(AdminFSM.await_dashboard_interval)
+async def msg_dashboard_interval(msg: Message, state: FSMContext) -> None:
+    if not _is_admin(msg.from_user.id):
+        return
+    if not (msg.text or "").strip().isdigit() or int(msg.text.strip()) < 1:
+        await msg.answer("⚠️ Введите целое число ≥ 1.")
+        return
+    set_mgr_reminder_interval_min(int(msg.text.strip()))
+    await state.clear()
+    await msg.answer(_reminders_text(), reply_markup=_reminders_kb(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "adm:dashboard_now")
+async def adm_dashboard_now(cq: CallbackQuery, bot: Bot) -> None:
+    if not _is_admin(cq.from_user.id):
+        await cq.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    from services.dashboard_service import update_manager_dashboard
+    await update_manager_dashboard(bot)
+    await cq.answer("📤 Доска обновлена.")
 
 
 # ── /avg_order — Smart Statistics ─────────────────────────────────────────────
