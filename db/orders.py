@@ -339,14 +339,25 @@ class LocationOrderStatus:
 def get_location_order_status_today() -> List[LocationOrderStatus]:
     """
     For every location, returns which mandatory categories are missing today.
+    Only categories scheduled for today (order_days bitmask) are included.
     'Today' is computed as midnight–now in Asia/Yekaterinburg time.
     """
     today_start_iso = _local_today_start_iso()
+    # weekday(): Mon=0 … Sun=6, matches order_days bitmask bit positions
+    now_utc = datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        local_now = now_utc.astimezone(ZoneInfo("Asia/Yekaterinburg"))
+    except ImportError:
+        local_now = now_utc + timedelta(hours=5)
+    today_bit = 1 << local_now.weekday()
+
     db = get_db()
     all_categories = [
         r["name"] for r in db.execute(
-            "SELECT name FROM categories ORDER BY sort_order, id"
+            "SELECT name, order_days FROM categories ORDER BY sort_order, id"
         ).fetchall()
+        if (r["order_days"] or 127) & today_bit
     ]
     locations = db.execute(
         "SELECT id, name FROM locations ORDER BY id"
