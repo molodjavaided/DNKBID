@@ -24,6 +24,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.env import ADMIN_USER_ID, MANAGER_CHAT_ID
+from services.dashboard_service import update_manager_dashboard
 from db.catalog import get_category_by_id, get_item_by_id
 from db.chats import upsert_chat
 from db.locations import get_location_by_id
@@ -921,14 +922,7 @@ async def cb_submit(cq: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             parse_mode="HTML",
         )
         await cq.answer("Заявка обновлена!")
-        try:
-            await bot.send_message(
-                MANAGER_CHAT_ID,
-                f"✏️ <b>Заявка #{editing_order_id} обновлена</b> ({who})\n\n{summary}",
-                parse_mode="HTML",
-            )
-        except Exception as exc:
-            log.error("[Order] Manager notify failed: %s", exc)
+        await update_manager_dashboard(bot)
 
     else:
         order_id = create_order(
@@ -948,16 +942,9 @@ async def cb_submit(cq: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             parse_mode="HTML",
         )
         await cq.answer("Заявка отправлена!")
-        try:
-            await bot.send_message(
-                MANAGER_CHAT_ID,
-                f"📦 <b>Новая заявка #{order_id}</b> от {who}\n\n{summary}",
-                parse_mode="HTML",
-            )
-        except Exception as exc:
-            log.error("[Order] Manager notify failed: %s", exc)
+        await update_manager_dashboard(bot)
 
-    # Urgent items — immediate separate notification
+    # Urgent items — отдельное сообщение (всегда новое)
     urgent_grouped = [e for e in _group_cart(cart) if e["is_urgent"]]
     if urgent_grouped:
         urgent_parts = [
